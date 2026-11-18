@@ -6,9 +6,12 @@ import { organization } from "better-auth/plugins";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { authBaseURL } from "@/lib/auth-url";
 
 export const auth = betterAuth({
   // In production set BETTER_AUTH_SECRET and BETTER_AUTH_URL (see .env.example).
+  // Only the origin of BETTER_AUTH_URL is used, so a stray path like /sign-in can't move the auth endpoints.
+  baseURL: authBaseURL(process.env.BETTER_AUTH_URL),
   database: drizzleAdapter(db, { provider: "pg", schema }),
   emailAndPassword: { enabled: true, minPasswordLength: 8 },
   plugins: [
