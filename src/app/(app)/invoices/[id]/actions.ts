@@ -1,10 +1,11 @@
 "use server";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { after } from "next/server";
 import { db } from "@/db";
-import { invoiceFields, invoiceLineItems, invoices } from "@/db/schema";
+import { invoiceFields, invoiceLineItems, invoices, type ValidationIssue } from "@/db/schema";
+import { EXTRACTING_STALE_MS } from "@/lib/invoice-status";
 import { HEADER_FIELDS, type HeaderFieldName } from "@/lib/ai/invoice-schema";
 import { processInvoice } from "@/lib/extraction/process-invoice";
 import { checkInvoice, invoiceColumnsFrom, normalizeValue } from "@/lib/extraction/validate";
@@ -26,15 +27,52 @@ const FORMAT_HINT = {
 export async function saveCorrections(invoiceId: string, _prev: SaveState, formData: FormData): Promise<SaveState> {
   const { user, orgId } = await requireOrg();
 
-  const [invoice] = await db
-    .select({ id: invoices.id, status: invoices.status })
-    .from(invoices)
-    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
-    .limit(1);
-  if (!invoice) return { ok: false, message: "Invoice not found." };
-  if (invoice.status !== "needs_review") return { ok: false, message: "This invoice can't be edited right now." };
+  // One transaction, and the invoice row is locked first: two reviewers saving at the same time
+  // are applied one after the other, so the second save sees the first one's corrections instead
+  // of overwriting the invoice's totals with a stale snapshot.
+  const result = await db.transaction(async (tx) => {
+    const [invoice] = await tx
+      .select({ id: invoices.id, status: invoices.status, validationIssues: invoices.validationIssues })
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+      .for("update")
+      .limit(1);
+    if (!invoice) return { ok: false, message: "Invoice not found." } satisfies SaveState;
+    if (invoice.status !== "needs_review") {
+      return { ok: false, message: "This invoice can't be edited right now." } satisfies SaveState;
+    }
+    return applyCorrections(tx, invoice, orgId, user.id, formData);
+  });
 
-  const rows = await db.select().from(invoiceFields).where(eq(invoiceFields.invoiceId, invoiceId));
+  if (result.ok && result.message !== NO_CHANGES) refresh();
+  return result;
+}
+
+const NO_CHANGES = "No changes to save.";
+
+/** Issue codes that checkInvoice() recomputes. Any other issue (e.g. not_an_invoice) is kept on save. */
+const RECOMPUTED: ReadonlySet<ValidationIssue["code"]> = new Set([
+  "missing_total",
+  "totals_mismatch",
+  "line_items_mismatch",
+  "line_amount_mismatch",
+  "due_before_invoice",
+]);
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function applyCorrections(
+  tx: Tx,
+  invoice: { id: string; validationIssues: ValidationIssue[] },
+  orgId: string,
+  userId: string,
+  formData: FormData,
+): Promise<NonNullable<SaveState>> {
+  const invoiceId = invoice.id;
+  const rows = await tx
+    .select()
+    .from(invoiceFields)
+    .where(and(eq(invoiceFields.invoiceId, invoiceId), eq(invoiceFields.orgId, orgId)));
   const byName = new Map(rows.map((r) => [r.fieldName, r]));
 
   const fieldErrors: Partial<Record<HeaderFieldName, string>> = {};
@@ -62,55 +100,67 @@ export async function saveCorrections(invoiceId: string, _prev: SaveState, formD
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, message: "Some values need fixing.", fieldErrors };
   }
-  if (updates.length === 0) return { ok: true, message: "No changes to save." };
+  if (updates.length === 0) return { ok: true, message: NO_CHANGES };
 
-  const lines = await db
+  const lines = await tx
     .select()
     .from(invoiceLineItems)
-    .where(eq(invoiceLineItems.invoiceId, invoiceId))
+    .where(and(eq(invoiceLineItems.invoiceId, invoiceId), eq(invoiceLineItems.orgId, orgId)))
     .orderBy(asc(invoiceLineItems.position));
   const columns = invoiceColumnsFrom(effective);
-  // Re-run the arithmetic checks on the corrected values, so fixed problems disappear.
-  const issues = checkInvoice({
-    subtotalCents: columns.subtotalCents,
-    taxCents: columns.taxCents,
-    totalCents: columns.totalCents,
-    invoiceDate: effective.invoice_date,
-    dueDate: effective.due_date,
-    currency: columns.currency,
-    lineItems: lines,
-  });
+  // Re-run the arithmetic checks on the corrected values, so fixed problems disappear. Issues the
+  // checks can't recompute (like "not an invoice") are kept: editing a field doesn't resolve them.
+  const issues = [
+    ...invoice.validationIssues.filter((i) => !RECOMPUTED.has(i.code)),
+    ...checkInvoice({
+      subtotalCents: columns.subtotalCents,
+      taxCents: columns.taxCents,
+      totalCents: columns.totalCents,
+      invoiceDate: effective.invoice_date,
+      dueDate: effective.due_date,
+      currency: columns.currency,
+      lineItems: lines,
+    }),
+  ];
 
   const now = new Date();
-  await db.transaction(async (tx) => {
-    for (const u of updates) {
-      await tx
-        .update(invoiceFields)
-        .set(
-          u.corrected
-            ? { correctedValue: u.correctedValue, correctedBy: user.id, correctedAt: now }
-            : { correctedValue: null, correctedBy: null, correctedAt: null },
-        )
-        .where(and(eq(invoiceFields.id, u.id), eq(invoiceFields.orgId, orgId)));
-    }
+  for (const u of updates) {
     await tx
-      .update(invoices)
-      .set({ ...columns, validationIssues: issues })
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
-  });
+      .update(invoiceFields)
+      .set(
+        u.corrected
+          ? { correctedValue: u.correctedValue, correctedBy: userId, correctedAt: now }
+          : { correctedValue: null, correctedBy: null, correctedAt: null },
+      )
+      .where(and(eq(invoiceFields.id, u.id), eq(invoiceFields.orgId, orgId)));
+  }
+  await tx
+    .update(invoices)
+    .set({ ...columns, validationIssues: issues })
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
 
-  refresh();
   return { ok: true, message: `Saved ${updates.length} change${updates.length === 1 ? "" : "s"}.` };
 }
 
-/** Sends a failed (or never-processed) invoice through extraction. */
+/** Sends a failed, never-processed, or abandoned (stale `extracting`) invoice through extraction. */
 export async function retryExtraction(invoiceId: string): Promise<void> {
   const { orgId } = await requireOrg();
   const [queued] = await db
     .update(invoices)
     .set({ status: "received", extractionError: null })
     .where(
-      and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId), inArray(invoices.status, ["received", "failed"])),
+      and(
+        eq(invoices.id, invoiceId),
+        eq(invoices.orgId, orgId),
+        or(
+          inArray(invoices.status, ["received", "failed"]),
+          // Only once it's stale, so this can't start a second model call next to a live one.
+          and(
+            eq(invoices.status, "extracting"),
+            lt(invoices.updatedAt, new Date(Date.now() - EXTRACTING_STALE_MS)),
+          ),
+        ),
+      ),
     )
     .returning({ id: invoices.id });
   if (queued) after(() => processInvoice(invoiceId, orgId));

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { HEADER_FIELDS, type FieldKind } from "@/lib/ai/invoice-schema";
 import { formatMicros } from "@/lib/ai/pricing";
 import { formatBytes } from "@/lib/files";
-import { isProcessing, isStuckReceived } from "@/lib/invoice-status";
+import { isProcessing, isStuck } from "@/lib/invoice-status";
 import { centsToDecimalString, formatCents } from "@/lib/money";
 import { requireOrg } from "@/lib/session";
 import { retryExtraction } from "./actions";
@@ -97,7 +97,7 @@ async function InvoiceDetail({ params }: { params: Promise<{ id: string }> }) {
     sourceText: li.sourceText,
   }));
 
-  const stuck = isStuckReceived(invoice);
+  const stuck = isStuck(invoice);
   const processing = isProcessing(invoice);
   const fileUrl = `/api/invoices/${invoice.id}/file`;
 
@@ -133,7 +133,11 @@ async function InvoiceDetail({ params }: { params: Promise<{ id: string }> }) {
 
       {stuck && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 p-3 text-sm">
-          <span>This invoice hasn&apos;t been read yet.</span>
+          <span>
+            {invoice.status === "extracting"
+              ? "Reading this invoice stopped before it finished."
+              : "This invoice hasn't been read yet."}
+          </span>
           <form action={retryExtraction.bind(null, invoice.id)}>
             <Button type="submit" size="sm">
               Read with AI

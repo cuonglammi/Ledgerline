@@ -4,12 +4,11 @@ import { db } from "@/db";
 import { extractionRuns, invoiceFields, invoiceLineItems, invoices } from "@/db/schema";
 import { extractInvoice } from "@/lib/ai/extract-invoice";
 import { HEADER_FIELDS, type HeaderFieldName } from "@/lib/ai/invoice-schema";
+import { EXTRACTING_STALE_MS } from "@/lib/invoice-status";
 import type { AllowedType } from "@/lib/upload-limits";
 import { getFile } from "@/lib/storage";
 import { invoiceColumnsFrom, validateExtraction } from "./validate";
 
-/** An invoice stuck in `extracting` this long is assumed abandoned (e.g. the server restarted) and can be retried. */
-const STALE_AFTER_MS = 5 * 60_000;
 
 /**
  * received → extracting → needs_review (or failed).
@@ -28,7 +27,7 @@ export async function processInvoice(invoiceId: string, orgId: string): Promise<
         eq(invoices.orgId, orgId),
         or(
           inArray(invoices.status, ["received", "failed"]),
-          and(eq(invoices.status, "extracting"), lt(invoices.updatedAt, new Date(Date.now() - STALE_AFTER_MS))),
+          and(eq(invoices.status, "extracting"), lt(invoices.updatedAt, new Date(Date.now() - EXTRACTING_STALE_MS))),
         ),
       ),
     )
