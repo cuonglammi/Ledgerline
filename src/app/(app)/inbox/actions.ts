@@ -2,8 +2,10 @@
 
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
+import { after } from "next/server";
 import { db } from "@/db";
 import { invoices } from "@/db/schema";
+import { processInvoice } from "@/lib/extraction/process-invoice";
 import { fileKey, sha256, validateUpload } from "@/lib/files";
 import { requireOrg } from "@/lib/session";
 import { putFile } from "@/lib/storage";
@@ -62,7 +64,9 @@ export async function uploadInvoice(formData: FormData): Promise<UploadResult> {
     return { ok: true, invoiceId: winner!.id, duplicate: true, fileName };
   }
 
-  // Week 4: this is where the `invoice/received` event is sent to start the AI pipeline.
+  // Read the invoice with AI once the response has been sent, so the upload returns immediately.
+  // Week 4 replaces this with an `invoice/received` event to a durable Inngest workflow.
+  after(() => processInvoice(created.id, orgId));
   refresh();
   return { ok: true, invoiceId: created.id, duplicate: false, fileName };
 }

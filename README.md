@@ -2,7 +2,7 @@
 
 **AI accounts payable for small businesses.** Forward an invoice, and Ledgerline reads it, checks it against your purchase orders, routes it for approval, and exports it to your books.
 
-> **Status:** Week 1 of 8. Accounts, team workspaces, invoice upload and the inbox work. AI extraction is next. See [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md).
+> **Status:** Week 2 of 8. Upload an invoice and Claude reads it into structured fields; a review screen shows the PDF beside the fields, highlights where each value came from, and saves human corrections. The eval harness is next. See [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md).
 
 ## The problem
 
