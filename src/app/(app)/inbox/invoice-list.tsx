@@ -2,9 +2,11 @@ import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { invoices } from "@/db/schema";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { StatusBadge } from "@/components/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes } from "@/lib/files";
+import { isProcessing } from "@/lib/invoice-status";
 import { formatCents } from "@/lib/money";
 import { requireOrg } from "@/lib/session";
 
@@ -27,8 +29,12 @@ export async function InvoiceList() {
     );
   }
 
+  const processing = rows.some((r) => isProcessing(r));
+
   return (
     <div className="rounded-xl border">
+      {/* Keep statuses live while the AI is still reading something. */}
+      <AutoRefresh active={processing} />
       <Table>
         <TableHeader>
           <TableRow>

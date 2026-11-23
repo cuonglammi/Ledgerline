@@ -116,7 +116,7 @@ Store money as **integer cents**, never floats. You will be asked about this.
 Node and pnpm are installed. The rest needs your own accounts.
 
 - [x] Install Node LTS (done: Node 26 in `~/.local/node`) and pnpm
-- [ ] Create GitHub repo `ledgerline`, push an empty README
+- [x] Create GitHub repo `ledgerline`, push an empty README
 - [ ] Create free accounts: Vercel, Neon, Cloudflare (R2), Inngest, Sentry, Anthropic Console (add ~$10 credit — enough for the whole project)
 - [ ] Write a one-paragraph problem statement in the README *before* any code. This becomes your pitch.
 
@@ -131,7 +131,7 @@ Node and pnpm are installed. The rest needs your own accounts.
 - [x] Drizzle + Postgres, `invoices` table, first migration (local PGlite in dev; Neon once you add `DATABASE_URL`)
 - [x] Upload: PDF/image → storage (local disk in dev, R2 when configured), SHA-256 `file_hash`, duplicate check, invoice row with status `received`
 - [x] Inbox page: table of invoices with status badges
-- [ ] Deploy to Vercel; connect GitHub so every push deploys
+- [x] Deploy to Vercel; connect GitHub so every push deploys
 - [x] GitHub Actions: lint + typecheck + unit tests + migrations + build on every PR
 
 **Done when:** a friend can open your URL, sign up, and upload a PDF.
@@ -143,12 +143,12 @@ Node and pnpm are installed. The rest needs your own accounts.
 
 **Goal:** upload an invoice → structured fields appear in ~10 seconds, and a human can fix them.
 
-- [ ] Define `invoice-schema.ts` with Zod: vendor name, invoice #, dates, totals, line items. For **each field** also ask for `confidence` (0–1), `page`, and `source_text` (the exact text it read)
-- [ ] `extract-invoice.ts`: send the PDF as a `document` block to Claude and get typed JSON back via **structured outputs** (`client.messages.parse()` / `output_config.format`). Read `stop_reason` before trusting the result
-- [ ] Log every call to `extraction_runs` (tokens, cost, latency, prompt version) — this table feeds your resume numbers
-- [ ] Validate after the model: does `sum(line items) + tax == total`? If not, drop confidence and flag it. *Never trust the model blindly — show this in interviews.*
-- [ ] Review page: PDF on the left (react-pdf), editable fields on the right. Fields under 0.8 confidence are highlighted yellow. Clicking a field highlights its `source_text` on the PDF (search the pdf.js text layer)
-- [ ] Save human corrections to `corrected_value` (this becomes free eval data later)
+- [x] Define `invoice-schema.ts` with Zod: vendor name, invoice #, dates, totals, line items. For **each field** also ask for `confidence` (0–1), `page`, and `source_text` (the exact text it read)
+- [x] `extract-invoice.ts`: send the PDF as a `document` block to Claude and get typed JSON back via **structured outputs** (`client.messages.parse()` / `output_config.format`). Read `stop_reason` before trusting the result
+- [x] Log every call to `extraction_runs` (tokens, cost, latency, prompt version) — this table feeds your resume numbers
+- [x] Validate after the model: does `sum(line items) + tax == total`? If not, drop confidence and flag it. *Never trust the model blindly — show this in interviews.*
+- [x] Review page: PDF on the left (react-pdf), editable fields on the right. Fields under 0.8 confidence are highlighted yellow. Clicking a field highlights its `source_text` on the PDF (search the pdf.js text layer)
+- [x] Save human corrections to `corrected_value` (this becomes free eval data later)
 
 **Done when:** you upload 5 different real-looking invoices and the review screen is useful on all of them.
 **Learn this week:** structured outputs, Zod, why LLM output must be validated.
